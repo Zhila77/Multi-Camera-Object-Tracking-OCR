@@ -1,0 +1,36 @@
+FROM python:3.12-slim
+
+# Install OpenCV system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libglib2.0-0 \
+        libsm6 \
+        libxrender1 \
+        libxext6 \
+        libgl1 \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies first (layer cache)
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e ".[dev]" || pip install --no-cache-dir \
+        uvloop \
+        opencv-python-headless \
+        numpy \
+        redis[asyncio] \
+        httpx \
+        omegaconf \
+        pyyaml \
+        pydantic \
+        prometheus-client \
+        msgpack
+
+# Copy source
+COPY src/ src/
+COPY configs/ configs/
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
+
+CMD ["python", "-m", "eaigle.app", "--config", "configs/pipeline.yaml"]

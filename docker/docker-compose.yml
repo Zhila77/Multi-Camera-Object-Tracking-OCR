@@ -1,0 +1,135 @@
+version: "3.9"
+
+# ============================================================
+# EAIGLE AI — Full Stack
+#
+# Services:
+#   redis       — message broker & hypothesis store
+#   inference   — detection microservice (stub)
+#   pipeline    — ingestion + preprocessing + aggregation
+#   simulator   — mock camera frames (no RTSP needed)
+#   prometheus  — metrics scraping
+# ============================================================
+
+services:
+
+  # ---- Redis -------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---- Inference microservice --------------------------------------
+  inference:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.inference
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Pipeline (ingestion + preprocessing + aggregation) ----------
+  pipeline:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pipeline
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      inference:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "9090:9090"    # Prometheus metrics
+    volumes:
+      - /dev/shm:/dev/shm   # Shared memory for zero-copy frame transfer
+      - ../configs:/app/configs:ro
+    ipc: host   # Required for POSIX shared memory across containers
+
+  # ---- Mock camera simulator ---------------------------------------
+  simulator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pipeline
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - /dev/shm:/dev/shm
+      - ../scripts:/app/scripts:ro
+    ipc: host
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      python scripts/simulate_cameras.py
+        --cameras 5
+        --fps 10
+        --duration 0
+        --redis-url redis://redis:6379/0
+
+  # ---- Pipeline — DeepStream variant (GPU required) ----------------
+  # Activate with:  docker compose --profile deepstream up
+  pipeline-deepstream:
+    profiles: ["deepstream"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pipeline-deepstream
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      inference:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video]   # video → NVDEC hardware decode
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    ports:
+      - "9090:9090"
+    volumes:
+      - /dev/shm:/dev/shm
+      - ../configs:/app/configs:ro
+    ipc: host
+    # Override backend via mounted config override
+    command: >
+      python3 -m eaigle.app
+        --config configs/pipeline.yaml
+    # Provide a deepstream-specific config by volume-mounting an override:
+    #   - ../configs/pipeline-deepstream.yaml:/app/configs/pipeline.yaml:ro
+
+  # ---- Prometheus --------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    volumes:
+      - ../docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=1h"

@@ -1,0 +1,96 @@
+# ============================================================
+# EAIGLE AI — Multi-Camera CV Pipeline Configuration
+# ============================================================
+
+# --- Ingestion backend ---
+# backend: deepstream   NVIDIA DeepStream — hardware NVDEC decode, GPU batching.
+#                       Requires: NVIDIA GPU + DeepStream SDK ≥ 6.x + pyds.
+# backend: opencv       OpenCV + FFmpeg  — CPU decode, works anywhere. (default)
+#                       Falls back to opencv automatically if DeepStream unavailable.
+ingestion:
+  backend: opencv
+  deepstream:
+    output_width: 1280    # nvstreammux rescales all sources to this resolution
+    output_height: 720    # (GPU-side, before frames reach preprocessing)
+
+# --- Camera streams ---
+cameras:
+  max_count: 50
+  streams:
+    # Mock cameras (simulator fills in rtsp:// at runtime)
+    - id: cam_01
+      rtsp_url: "rtsp://localhost:8554/cam_01"
+      # rtsp_url: "/tmp/sample_frame.jpg"
+      target_fps: 10
+      width: 1280
+      height: 720
+      buffer_size: 1
+      reconnect_delay_s: 2.0
+      max_consecutive_failures: 30
+      zone: "Gate 1"
+
+    - id: cam_02
+      rtsp_url: "rtsp://localhost:8554/cam_02"
+      target_fps: 10
+      width: 1280
+      height: 720
+      buffer_size: 1
+      reconnect_delay_s: 2.0
+      max_consecutive_failures: 30
+      zone: "Gate 2"
+
+    - id: cam_03
+      rtsp_url: "rtsp://localhost:8554/cam_03"
+      target_fps: 5
+      width: 640
+      height: 480
+      buffer_size: 1
+      reconnect_delay_s: 2.0
+      max_consecutive_failures: 30
+      zone: "Yard Section B"
+
+# --- Preprocessing ---
+preprocessing:
+  num_workers: 4          # ProcessPoolExecutor workers (scale to CPU cores)
+  pipeline:
+    ops:
+      - type: color_convert
+        params:
+          src: BGR
+          dst: RGB
+      - type: resize
+        params:
+          width: 640
+          height: 640
+          interpolation: LINEAR
+      - type: gaussian_denoise
+        params:
+          kernel_size: 3
+      - type: normalize
+        params:
+          mean: [0.485, 0.456, 0.406]
+          std:  [0.229, 0.224, 0.225]
+
+# --- Inference service ---
+inference:
+  url: "http://localhost:8001"
+  batch_size: 8
+  batch_timeout_ms: 50.0
+  http_timeout_s: 5.0
+
+# --- Aggregation ---
+aggregation:
+  nms_iou_threshold: 0.45
+  min_confidence: 0.40
+  temporal_window: 5
+  temporal_min_presence: 2
+
+# --- Transport ---
+redis:
+  url: "redis://localhost:6379/0"
+
+# --- Observability ---
+observability:
+  metrics_port: 9090
+  log_level: "INFO"
+  json_logs: false

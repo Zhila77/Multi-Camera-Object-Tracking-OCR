@@ -1,0 +1,74 @@
+# ============================================================
+# EAIGLE AI — DeepStream backend configuration
+# Extend / override pipeline.yaml for GPU deployments.
+# ============================================================
+
+ingestion:
+  backend: deepstream
+  deepstream:
+    # nvstreammux rescales all RTSP sources to this resolution on the GPU
+    # before frames reach the preprocessing worker pool.
+    # Use 1920x1080 if your models need full HD input.
+    output_width: 1280
+    output_height: 720
+
+# With DeepStream handling decode + resize, preprocessing only needs
+# colour conversion and normalisation (skip the CPU resize step).
+preprocessing:
+  num_workers: 4
+  pipeline:
+    ops:
+      - type: color_convert
+        params:
+          src: BGR       # DeepStream outputs RGBA; probe strips alpha → RGB;
+          dst: RGB       # pipeline still expects colour_convert for safety
+      - type: normalize
+        params:
+          mean: [0.485, 0.456, 0.406]
+          std:  [0.229, 0.224, 0.225]
+
+# Camera streams — same as pipeline.yaml, listed again for clarity.
+# nvurisrcbin handles RTSP reconnection internally; reconnect_delay_s
+# and max_consecutive_failures are ignored by the DeepStream backend.
+cameras:
+  max_count: 50
+  streams:
+    - id: cam_01
+      rtsp_url: "rtsp://192.168.1.101:554/stream"
+      target_fps: 10
+      width: 1920
+      height: 1080
+      buffer_size: 1
+      reconnect_delay_s: 2.0
+      max_consecutive_failures: 30
+      zone: "Gate 1"
+
+    - id: cam_02
+      rtsp_url: "rtsp://192.168.1.102:554/stream"
+      target_fps: 10
+      width: 1920
+      height: 1080
+      buffer_size: 1
+      reconnect_delay_s: 2.0
+      max_consecutive_failures: 30
+      zone: "Gate 2"
+
+inference:
+  url: "http://inference:8001"
+  batch_size: 16      # larger batches — GPU handles more throughput
+  batch_timeout_ms: 40.0
+  http_timeout_s: 5.0
+
+aggregation:
+  nms_iou_threshold: 0.45
+  min_confidence: 0.40
+  temporal_window: 5
+  temporal_min_presence: 2
+
+redis:
+  url: "redis://redis:6379/0"
+
+observability:
+  metrics_port: 9090
+  log_level: "INFO"
+  json_logs: true

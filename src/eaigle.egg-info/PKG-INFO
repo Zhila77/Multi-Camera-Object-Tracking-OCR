@@ -1,0 +1,23 @@
+Metadata-Version: 2.4
+Name: eaigle
+Version: 0.1.0
+Summary: Multi-camera computer vision pipeline
+Requires-Python: >=3.11
+Requires-Dist: uvloop>=0.19
+Requires-Dist: opencv-python-headless>=4.9
+Requires-Dist: numpy>=1.26
+Requires-Dist: Pillow>=10.0
+Requires-Dist: redis[asyncio]>=5.0
+Requires-Dist: fastapi>=0.111
+Requires-Dist: uvicorn[standard]>=0.29
+Requires-Dist: httpx>=0.27
+Requires-Dist: omegaconf>=2.3
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: pydantic>=2.0
+Requires-Dist: structlog>=24.0
+Requires-Dist: prometheus-client>=0.20
+Requires-Dist: msgpack>=1.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
+Requires-Dist: pytest-mock>=3.12; extra == "dev"
