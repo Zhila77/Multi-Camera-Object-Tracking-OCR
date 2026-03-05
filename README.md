@@ -16,6 +16,7 @@
 5. [Deployment Strategy](#5-deployment-strategy)
 6. [Configuration Reference](#6-configuration-reference)
 7. [How to Run](#7-how-to-run)
+12. [Future Work](#12-future-work)
 
 ---
 
@@ -1647,6 +1648,67 @@ docker compose up --scale inference=4
 Services: Redis, Inference (YOLOv8), Pipeline, Simulator, Prometheus.
 All services share a `eaigle_net` bridge network.
 Prometheus scrapes pipeline metrics automatically.
+
+---
+
+## 12. Future Work
+
+### 12.1 Inference & Models
+
+| Direction | Description |
+|---|---|
+| **Multi-model ensemble** | Run YOLOv8n + YOLOv8m in parallel, fuse results with weighted NMS for better accuracy/speed tradeoff |
+| **Real OCR** | Replace the stub secondary stage with EasyOCR or PaddleOCR for actual license plate and badge reading |
+| **Action recognition** | Add a temporal model (SlowFast, VideoMAE) on person crops to detect loitering, running, or fighting |
+| **Re-identification (Re-ID)** | Track the same person/vehicle across multiple cameras using OSNet or similar embedding model |
+
+### 12.2 Pipeline & Infrastructure
+
+| Direction | Description |
+|---|---|
+| **NVIDIA Triton Inference Server** | Batch requests from all 50 cameras to a shared GPU pool with dynamic batching and model versioning |
+| **GPU-accelerated preprocessing** | Replace OpenCV CPU ops with CUDA-based ops (cv2.cuda or cuCIM) to offload the ProcessPoolExecutor bottleneck |
+| **Frame deduplication** | Perceptual hashing (pHash) to skip near-identical frames and reduce inference load by 30–60% on static scenes |
+| **Adaptive frame rate** | Reduce polling rate per camera when scene is idle, increase when motion is detected |
+
+### 12.3 Data & Storage
+
+| Direction | Description |
+|---|---|
+| **Event-driven clip recording** | When a detection occurs, write a short video clip to object storage (MinIO/S3) with detection metadata |
+| **TimescaleDB / ClickHouse** | Store detection history for analytics queries — vehicle count by hour, dwell time heatmaps |
+| **Feature vector store** | Persist Re-ID embeddings in Milvus/Qdrant for cross-session identity matching |
+
+### 12.4 Reliability
+
+| Direction | Description |
+|---|---|
+| **Dead-letter queue** | Route failed inference frames to a separate Redis stream for retry or manual review |
+| **Circuit breaker** | If inference service latency spikes, automatically fall back to stub and alert operators |
+| **Camera health monitoring** | Detect stream disconnects, frozen frames, and blur/occlusion automatically |
+
+### 12.5 Observability
+
+| Direction | Description |
+|---|---|
+| **Grafana dashboards** | Wire existing Prometheus metrics to dashboards showing per-camera FPS, inference latency p95, detection rates |
+| **OpenTelemetry tracing** | Trace a single frame end-to-end across all services with distributed spans |
+
+### 12.6 Security
+
+| Direction | Description |
+|---|---|
+| **RBAC on the API** | JWT-based access control so only authorized services can post to `/detect/*` |
+| **Encrypted shared memory** | For deployments where frame data is sensitive (e.g., government or critical infrastructure sites) |
+
+### 12.7 Recommended Priorities
+
+The highest-ROI next steps based on the current prototype:
+
+1. **Real OCR** — completes the secondary pipeline with actual value output
+2. **NVIDIA Triton** — unlocks multi-model GPU batching and model versioning at scale
+3. **TimescaleDB** — makes detections queryable for reporting and business intelligence
+4. **Re-ID across cameras** — the key capability that elevates this from a detector to a tracking system
 
 ---
 
