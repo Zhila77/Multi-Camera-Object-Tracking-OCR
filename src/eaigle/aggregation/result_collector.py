@@ -1,4 +1,14 @@
+"""
+ResultCollector — consumes inference_results from Redis Stream,
+groups StageResults by (frame_id, camera_id), waits for all expected
+stages to arrive (or a timeout), then calls HypothesisFusion.
 
+Design choices:
+  - In-memory accumulator dict keyed by frame_id.
+  - Frames are flushed once both "primary" and "secondary" stages have
+    arrived, OR after FRAME_TIMEOUT_S seconds (whichever comes first).
+  - Completed hypotheses are pushed to HypothesisStore.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -16,8 +26,9 @@ from eaigle.transport.stream_consumer import StreamConsumer
 
 logger = logging.getLogger(__name__)
 
-FRAME_TIMEOUT_S = 2.0
+FRAME_TIMEOUT_S = 2.0      # Max wait before flushing incomplete frames
 EXPECTED_STAGES = {"primary", "secondary"}
+
 
 @dataclass
 class FrameAccumulator:
@@ -34,6 +45,7 @@ class FrameAccumulator:
     @property
     def age_s(self) -> float:
         return time.monotonic() - self.created_at
+
 
 class ResultCollector:
     def __init__(
@@ -58,6 +70,7 @@ class ResultCollector:
         )
         await consumer.setup_groups()
 
+        # Background task: flush timed-out frames
         cleanup_task = asyncio.create_task(self._cleanup_loop(stop_event))
 
         async for stream_name, msg_id, fields in consumer.iter_messages():
@@ -70,16 +83,19 @@ class ResultCollector:
             await consumer.ack(stream_name, msg_id)
 
         cleanup_task.cancel()
-
+        # Flush any remaining frames
         for acc in list(self._accum.values()):
             await self._flush(acc)
 
         logger.info("ResultCollector stopped")
 
+    # ------------------------------------------------------------------
+
     async def _handle_message(self, fields: dict) -> None:
         capture_ts = float(fields["capture_ts"])
         result_dict = json.loads(fields["result_json"])
 
+        # Reconstruct StageResult from dict
         stage_result = _stage_result_from_dict(result_dict)
         frame_id = stage_result.frame_id
         camera_id = stage_result.camera_id
@@ -94,6 +110,7 @@ class ResultCollector:
         acc = self._accum[frame_id]
         acc.stages[stage_result.stage] = stage_result
 
+        # Flush immediately once all stages have arrived
         if acc.is_complete:
             await self._flush(acc)
             del self._accum[frame_id]
@@ -109,7 +126,7 @@ class ResultCollector:
         await self._store.save(hypothesis)
 
     async def _cleanup_loop(self, stop_event: asyncio.Event) -> None:
-        
+        """Periodically flush frames that timed out waiting for all stages."""
         while not stop_event.is_set():
             await asyncio.sleep(1.0)
             timed_out = [
@@ -123,6 +140,11 @@ class ResultCollector:
                 )
                 await self._flush(acc)
                 self._accum.pop(acc.frame_id, None)
+
+
+# ------------------------------------------------------------------
+# Deserialization helper
+# ------------------------------------------------------------------
 
 def _stage_result_from_dict(d: dict) -> StageResult:
     detections = []

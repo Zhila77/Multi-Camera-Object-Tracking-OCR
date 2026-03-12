@@ -1,9 +1,15 @@
+"""
+Spatial Non-Maximum Suppression (NMS).
 
+Removes overlapping bounding boxes within the same detection stage,
+keeping the highest-confidence box when IoU exceeds the threshold.
+"""
 from __future__ import annotations
 
 from typing import List
 
 from eaigle.models.detection import Detection
+
 
 class SpatialNMS:
     def __init__(self, iou_threshold: float = 0.45):
@@ -13,6 +19,7 @@ class SpatialNMS:
         if len(detections) <= 1:
             return detections
 
+        # Sort by confidence descending
         sorted_dets = sorted(detections, key=lambda d: d.confidence, reverse=True)
         kept: List[Detection] = []
 

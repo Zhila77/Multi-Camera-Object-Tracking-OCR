@@ -1,7 +1,11 @@
-
+"""
+Async Redis client wrapper.
+Single shared connection pool used by producers and consumers.
+"""
 from __future__ import annotations
 
 import redis.asyncio as aioredis
+
 
 class RedisClient:
     def __init__(self, client: aioredis.Redis):

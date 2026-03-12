@@ -1,5 +1,15 @@
+"""
+InferenceDispatcher — bridges the preprocessed_frames Redis Stream and
+the remote inference HTTP service.
 
-
+Flow:
+  1. Reads FrameMetadata from Redis Stream (preprocessed_frames).
+  2. Reads pixel data from POSIX shared memory.
+  3. Encodes frames as base64 and assembles batches via DynamicBatcher.
+  4. POSTs primary-detection batch to inference service.
+  5. For each primary detection, sends a crop batch for secondary detection.
+  6. Publishes all StageResults to the results Redis Stream.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 RESULTS_STREAM = "inference_results"
 AGGREGATION_GROUP = "aggregation_workers"
+
 
 class InferenceDispatcher:
     def __init__(
@@ -75,6 +86,10 @@ class InferenceDispatcher:
         await self._client.aclose()
         logger.info("InferenceDispatcher stopped")
 
+    # ------------------------------------------------------------------
+    # Batch dispatch
+    # ------------------------------------------------------------------
+
     async def _dispatch_batch(self, batch: List[FrameMetadata]) -> None:
         if not batch:
             return
@@ -82,6 +97,7 @@ class InferenceDispatcher:
         batch_id = str(uuid.uuid4())
         t0 = time.monotonic()
 
+        # Build HTTP payload — read pixel data from shm
         frames_payload = []
         loaded_frames: dict[str, tuple[np.ndarray, FrameMetadata]] = {}
 
@@ -89,16 +105,13 @@ class InferenceDispatcher:
             try:
                 shape = (meta.height, meta.width, meta.channels)
                 arr = read_frame_from_shm(meta.shm_key, shape, np.dtype(meta.dtype))
-                if arr.size == 0:
-                    logger.warning("Empty frame %s from shm — skipping", meta.frame_id)
-                    continue
                 loaded_frames[meta.frame_id] = (arr, meta)
                 frames_payload.append({
                     "frame_id": meta.frame_id,
                     "camera_id": meta.camera_id,
                     "data_b64": base64.b64encode(arr.tobytes()).decode(),
                     "shape": list(arr.shape),
-                    "dtype": arr.dtype.name,
+                    "dtype": str(arr.dtype),
                     "stage": "primary",
                 })
             except Exception as exc:
@@ -107,6 +120,7 @@ class InferenceDispatcher:
         if not frames_payload:
             return
 
+        # ---- Stage A: Primary detection ----
         primary_results = await self._post_inference(
             "/detect/primary", batch_id, frames_payload
         )
@@ -118,13 +132,13 @@ class InferenceDispatcher:
             bbox_d = det_dict["bbox"]
             det = Detection.create(
                 frame_id=det_dict["frame_id"],
-                camera_id=batch[0].camera_id,
+                camera_id=batch[0].camera_id,   # will be fixed per-frame below
                 stage="primary",
                 label=det_dict["label"],
                 confidence=det_dict["confidence"],
                 bbox=BoundingBox(**bbox_d),
             )
-
+            # Fix camera_id from the original metadata
             orig = next(
                 (m for m in batch if m.frame_id == det_dict["frame_id"]), None
             )
@@ -132,6 +146,7 @@ class InferenceDispatcher:
                 det.camera_id = orig.camera_id
             stage_a_detections.append(det)
 
+        # Publish Stage A results
         for meta in batch:
             frame_dets = [d for d in stage_a_detections if d.frame_id == meta.frame_id]
             result = StageResult(
@@ -144,6 +159,7 @@ class InferenceDispatcher:
             )
             await self._publish_result(meta.capture_ts, result)
 
+        # ---- Stage B: Secondary (crop-level) detection ----
         crop_payload = []
         for det in stage_a_detections:
             orig_frame_meta = next(
@@ -180,7 +196,7 @@ class InferenceDispatcher:
                     bbox_d = det_dict["bbox"]
                     det = Detection.create(
                         frame_id=det_dict["frame_id"],
-                        camera_id="",
+                        camera_id="",   # filled below
                         stage="secondary",
                         label=det_dict["label"],
                         confidence=det_dict["confidence"],
@@ -195,6 +211,7 @@ class InferenceDispatcher:
                         det.camera_id = orig.camera_id
                     sec_dets.append(det)
 
+                # Publish Stage B results grouped by frame
                 for meta in batch:
                     frame_dets = [d for d in sec_dets if d.frame_id == meta.frame_id]
                     if frame_dets:
@@ -214,6 +231,10 @@ class InferenceDispatcher:
             "Dispatched batch %s: %d frames in %.1fms",
             batch_id, len(batch), (time.monotonic() - t0) * 1000,
         )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     async def _post_inference(
         self, path: str, batch_id: str, frames: list

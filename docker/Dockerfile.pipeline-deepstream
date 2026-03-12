@@ -1,10 +1,14 @@
 # ============================================================
 # EAIGLE AI — Pipeline image with NVIDIA DeepStream backend
-# Make sure Nvidia driver and Cuda are installed. 
+#
 # Base image: nvcr.io/nvidia/deepstream:7.0-gc-triton-devel
 #   - Ubuntu 22.04 + CUDA 12.x + cuDNN
 #   - All DeepStream GStreamer plugins (nvurisrcbin, nvstreammux, …)
-#   - GStreamer 1.20 #
+#   - GStreamer 1.20
+#
+# Usage:
+#   docker build -f docker/Dockerfile.pipeline-deepstream -t eaigle-pipeline-ds .
+#   docker run --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all eaigle-pipeline-ds
 # ============================================================
 FROM nvcr.io/nvidia/deepstream:7.0-gc-triton-devel
 

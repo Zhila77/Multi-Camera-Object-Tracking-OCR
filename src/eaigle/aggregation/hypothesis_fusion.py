@@ -1,4 +1,13 @@
+"""
+HypothesisFusion — aggregates all StageResults for a single frame into
+one Hypothesis with a human-readable event description.
 
+Fusion pipeline:
+  1. SpatialNMS        — remove overlapping boxes within each stage
+  2. ConfidenceVoting  — filter below minimum confidence
+  3. TemporalSmoother  — suppress flickering (requires history across frames)
+  4. Event narration   — produce a structured event description string
+"""
 from __future__ import annotations
 
 import logging
@@ -11,6 +20,7 @@ from eaigle.models.detection import Detection, StageResult
 from eaigle.models.hypothesis import CameraConfig, Hypothesis
 
 logger = logging.getLogger(__name__)
+
 
 class HypothesisFusion:
     def __init__(
@@ -35,25 +45,29 @@ class HypothesisFusion:
         capture_ts: float,
         stage_results: List[StageResult],
     ) -> Hypothesis:
-
+        # Split results by stage
         by_stage: Dict[str, List[Detection]] = {}
         for sr in stage_results:
             by_stage.setdefault(sr.stage, []).extend(sr.detections)
 
+        # --- Stage A (primary) fusion ---
         primary = by_stage.get("primary", [])
         primary = self._nms.apply(primary)
         primary = self._voting.apply(primary)
         primary = self._smoother.smooth(camera_id, primary)
 
+        # --- Stage B (secondary / OCR) fusion ---
         secondary = by_stage.get("secondary", [])
-        secondary = self._voting.apply(secondary)
+        secondary = self._voting.apply(secondary)   # NMS not needed for crops
 
+        # --- Overall confidence ---
         all_dets = primary + secondary
         overall_conf = (
             sum(d.confidence for d in all_dets) / len(all_dets)
             if all_dets else 0.0
         )
 
+        # --- Event narration ---
         zone = self._zones.get(camera_id, "unknown zone")
         event_desc = self._narrate(camera_id, zone, primary, secondary)
 
@@ -72,6 +86,10 @@ class HypothesisFusion:
             overall_confidence=round(overall_conf, 4),
             fusion_strategy="nms+confidence+temporal",
         )
+
+    # ------------------------------------------------------------------
+    # Event narration
+    # ------------------------------------------------------------------
 
     def _narrate(
         self,

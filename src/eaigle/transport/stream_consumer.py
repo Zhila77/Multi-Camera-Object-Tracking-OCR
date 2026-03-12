@@ -1,10 +1,14 @@
-
+"""
+Redis Streams consumer — reads from a consumer group with XREADGROUP.
+Provides at-least-once delivery; messages are ACK'd after processing.
+"""
 from __future__ import annotations
 
 import asyncio
 from typing import AsyncIterator, List, Tuple
 
 from eaigle.transport.redis_client import RedisClient
+
 
 class StreamConsumer:
     def __init__(
@@ -24,17 +28,21 @@ class StreamConsumer:
         self._batch_size = batch_size
 
     async def setup_groups(self) -> None:
-        
+        """Ensure all consumer groups exist (idempotent)."""
         from eaigle.transport.stream_producer import StreamProducer
 
+        # Re-use ensure_group from producer
         class _FakeRedis:
             raw = self._r
-        producer = StreamProducer(_FakeRedis())
+        producer = StreamProducer(_FakeRedis())  # type: ignore
         for stream in self._streams:
             await producer.ensure_group(stream, self._group)
 
     async def iter_messages(self) -> AsyncIterator[Tuple[str, str, dict]]:
-        
+        """
+        Yields (stream_name, message_id, message_dict) tuples.
+        Caller must call ack() after successful processing.
+        """
         stream_ids = {s: ">" for s in self._streams}
 
         while True:
@@ -61,6 +69,6 @@ class StreamConsumer:
         await self._r.xack(stream_name, self._group, msg_id)
 
     async def get_stream_lag(self, stream_name: str) -> int:
-        
+        """Returns number of pending (unconsumed) messages in the group."""
         info = await self._r.xpending(stream_name, self._group)
         return info.get("pending", 0) if isinstance(info, dict) else 0

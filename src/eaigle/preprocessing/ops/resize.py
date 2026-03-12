@@ -13,8 +13,9 @@ _INTERP_MAP = {
     "LANCZOS": cv2.INTER_LANCZOS4,
 }
 
+
 class ResizeOp(BaseOp):
-    
+    """Resize frame to (width, height) using configurable interpolation."""
 
     def __init__(self, width: int, height: int, interpolation: str = "LINEAR"):
         self._size = (width, height)

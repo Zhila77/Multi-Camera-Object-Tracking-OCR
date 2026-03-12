@@ -1,9 +1,15 @@
+"""
+Confidence-weighted filtering.
 
+Removes detections below the minimum threshold and returns
+the remainder sorted by confidence descending.
+"""
 from __future__ import annotations
 
 from typing import List
 
 from eaigle.models.detection import Detection
+
 
 class ConfidenceVoting:
     def __init__(self, min_confidence: float = 0.40):

@@ -1,11 +1,19 @@
-
+"""
+Structured logging configuration using structlog.
+Produces JSON-formatted logs in production; pretty-printed in development.
+"""
 from __future__ import annotations
 
 import logging
 import sys
 
+
 def configure_logging(level: str = "INFO", json_logs: bool = False) -> None:
-    
+    """
+    Configure standard library logging.
+    structlog is used for structured output; this function configures the
+    stdlib root logger as the backend.
+    """
     numeric_level = getattr(logging, level.upper(), logging.INFO)
 
     if json_logs:
@@ -35,5 +43,6 @@ def configure_logging(level: str = "INFO", json_logs: bool = False) -> None:
     root.handlers.clear()
     root.addHandler(handler)
 
+    # Silence noisy third-party loggers
     for noisy in ("httpx", "httpcore", "asyncio", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

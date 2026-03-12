@@ -1,4 +1,7 @@
-
+"""
+Frame data models — lightweight descriptors that travel through Redis Streams.
+Pixel data stays in POSIX shared memory; only the shm_key pointer is transported.
+"""
 from __future__ import annotations
 
 import time
@@ -6,19 +9,23 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+
 @dataclass
 class FrameMetadata:
-    
+    """
+    Lightweight descriptor published to Redis Stream.
+    No pixel data — only a pointer (shm_key) to POSIX shared memory.
+    """
     frame_id: str
     camera_id: str
-    capture_ts: float
-    sequence_num: int
-    shm_key: str
+    capture_ts: float          # Unix timestamp at capture
+    sequence_num: int          # Monotonic counter per camera
+    shm_key: str               # POSIX shm name: "eaigle_{frame_id}"
     width: int
     height: int
-    channels: int
-    dtype: str
-    pipeline_stage: str
+    channels: int              # 3 for BGR/RGB
+    dtype: str                 # "uint8" | "float32"
+    pipeline_stage: str        # "raw" | "preprocessed"
 
     @classmethod
     def create(

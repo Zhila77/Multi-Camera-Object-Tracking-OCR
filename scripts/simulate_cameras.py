@@ -1,3 +1,17 @@
+"""
+Mock camera simulator.
+
+Generates synthetic video frames (coloured noise + timestamp overlay)
+and publishes them directly to Redis Streams, bypassing the need for a
+real RTSP server.
+
+This lets you test the full pipeline (preprocessing → inference → aggregation)
+without any camera hardware or RTSP infrastructure.
+
+Usage:
+    python scripts/simulate_cameras.py --cameras 5 --fps 10 --duration 60
+    python scripts/simulate_cameras.py --cameras 50 --fps 5
+"""
 from __future__ import annotations
 
 import argparse
@@ -11,8 +25,6 @@ from pathlib import Path
 
 # Make the src package importable when running from project root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-import os
 
 import cv2
 import numpy as np
@@ -49,27 +61,12 @@ def _generate_frame(
       - Gaussian noise to simulate real camera noise
       - A timestamp + camera label burned in
     """
-    # Try to load a real sample image so YOLO can find actual objects.
-    # Falls back to synthetic frame if no image is available.
-    _sample_paths = [
-        "/tmp/sample_frame.jpg",
-        "/tmp/sample_frame.png",
-    ]
-    base_frame = None
-    for p in _sample_paths:
-        if os.path.exists(p):
-            loaded = cv2.imread(p)
-            if loaded is not None:
-                base_frame = cv2.resize(loaded, (width, height))
-                break
+    base_color = _PALETTE[camera_idx % len(_PALETTE)]
+    frame = np.full((height, width, 3), base_color, dtype=np.uint8)
 
-    if base_frame is not None:
-        frame = base_frame.copy()
-    else:
-        base_color = _PALETTE[camera_idx % len(_PALETTE)]
-        frame = np.full((height, width, 3), base_color, dtype=np.uint8)
-        noise = np.random.normal(0, 15, frame.shape).astype(np.int16)
-        frame = np.clip(frame.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+    # Add noise
+    noise = np.random.normal(0, 15, frame.shape).astype(np.int16)
+    frame = np.clip(frame.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
     # Overlay timestamp + camera info
     ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -78,6 +75,11 @@ def _generate_frame(
         frame, label, (10, 30),
         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA,
     )
+
+    # Simulate a moving "object" (white rectangle)
+    x = int((seq * 8) % (width - 60))
+    cv2.rectangle(frame, (x, height // 2 - 30), (x + 60, height // 2 + 30),
+                  (255, 255, 255), -1)
 
     return frame
 

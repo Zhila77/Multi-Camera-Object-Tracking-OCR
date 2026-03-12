@@ -1,5 +1,11 @@
+"""
+DynamicBatcher — assembles frames into batches using a dual trigger:
+  1. Size trigger  : flush when batch reaches max_size.
+  2. Time trigger  : flush when max_wait_ms has elapsed since first item.
 
-
+This bounds worst-case latency while maximising GPU utilisation.
+Thread/coroutine safe via asyncio.Lock.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +13,7 @@ import time
 from typing import Awaitable, Callable, List
 
 from eaigle.models.frame import FrameMetadata
+
 
 class DynamicBatcher:
     def __init__(
@@ -25,7 +32,7 @@ class DynamicBatcher:
     async def add(self, meta: FrameMetadata) -> None:
         async with self._lock:
             if not self._batch:
-
+                # Start timeout timer on first item
                 self._timer_task = asyncio.create_task(self._timeout_flush())
             self._batch.append(meta)
 
@@ -48,7 +55,7 @@ class DynamicBatcher:
         await self._flush_cb(batch)
 
     async def flush_remaining(self) -> None:
-        
+        """Drain any partially-assembled batch at shutdown."""
         async with self._lock:
             if self._timer_task:
                 self._timer_task.cancel()

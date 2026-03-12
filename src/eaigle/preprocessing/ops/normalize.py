@@ -4,8 +4,12 @@ import numpy as np
 
 from eaigle.preprocessing.ops.base_op import BaseOp
 
+
 class NormalizeOp(BaseOp):
-    
+    """
+    Normalise pixel values to [0,1] then apply per-channel mean/std subtraction
+    (ImageNet defaults).  Produces float32 output suitable for DL models.
+    """
 
     def __init__(
         self,

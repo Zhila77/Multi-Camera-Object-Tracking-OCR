@@ -1,13 +1,16 @@
-
+"""
+Detection data models for bounding boxes and multi-stage inference results.
+"""
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+
 @dataclass
 class BoundingBox:
-    
+    """Normalised [0,1] coordinates."""
     x1: float
     y1: float
     x2: float
@@ -50,20 +53,24 @@ class BoundingBox:
         return cls(x1=float(d["x1"]), y1=float(d["y1"]),
                    x2=float(d["x2"]), y2=float(d["y2"]))
 
+
 @dataclass
 class Detection:
-    
+    """
+    A single detection from one stage of the inference pipeline.
+    Stages: "primary" (e.g. vehicle/person) → "secondary" (e.g. plate/badge OCR)
+    """
     detection_id: str
     frame_id: str
     camera_id: str
-    stage: str
-    label: str
+    stage: str                              # "primary" | "secondary"
+    label: str                              # e.g. "vehicle", "person", "license_plate"
     confidence: float
     bbox: BoundingBox
     attributes: Dict[str, Any] = field(default_factory=dict)
-    parent_detection_id: Optional[str] = None
-    ocr_text: Optional[str] = None
-    track_id: Optional[str] = None
+    parent_detection_id: Optional[str] = None   # Links secondary → primary
+    ocr_text: Optional[str] = None              # Result from OCR secondary stage
+    track_id: Optional[str] = None              # Optional object tracking ID
 
     @classmethod
     def create(
@@ -106,9 +113,10 @@ class Detection:
             "track_id": self.track_id,
         }
 
+
 @dataclass
 class StageResult:
-    
+    """Aggregated output from a single inference stage for one frame."""
     frame_id: str
     camera_id: str
     stage: str

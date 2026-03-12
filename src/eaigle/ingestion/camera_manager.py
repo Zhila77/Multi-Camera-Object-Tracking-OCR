@@ -1,5 +1,12 @@
+"""
+CameraStreamManager — supervises all camera worker coroutines.
 
-
+Responsibilities:
+  - Spawns one asyncio Task per camera.
+  - Restarts crashed tasks (task supervision loop).
+  - Exposes per-camera health status.
+  - Creates Redis Stream consumer groups for downstream workers.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +18,9 @@ from eaigle.ingestion.camera_worker import CameraWorker
 from eaigle.transport.redis_client import RedisClient
 from eaigle.transport.stream_producer import StreamProducer
 logger = logging.getLogger(__name__)
+
 PREPROCESSING_GROUP = "preprocessing_workers"
+
 
 class CameraStreamManager:
     def __init__(
@@ -33,12 +42,14 @@ class CameraStreamManager:
         self._status: Dict[str, str] = {}
 
     async def run(self) -> None:
-
+        # Ensure consumer groups exist before workers start publishing
         await self._setup_groups()
 
+        # Spawn camera tasks
         for cfg in self._configs:
             await self._start_camera(cfg)
 
+        # Supervision loop: restart crashed tasks
         while not self._stop.is_set():
             for cfg in self._configs:
                 task = self._tasks.get(cfg.camera_id)
@@ -52,6 +63,7 @@ class CameraStreamManager:
                     await self._start_camera(cfg)
             await asyncio.sleep(2)
 
+        # Graceful shutdown
         logger.info("CameraStreamManager shutting down")
         self._stop.set()
         for task in self._tasks.values():

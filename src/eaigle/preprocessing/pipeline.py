@@ -1,4 +1,18 @@
+"""
+Composable preprocessing pipeline.
 
+Each op is a callable: np.ndarray → np.ndarray.
+The pipeline is stateless and safe to use across processes.
+
+Example config:
+  ops:
+    - type: color_convert
+      params: {src: BGR, dst: RGB}
+    - type: resize
+      params: {width: 640, height: 640}
+    - type: normalize
+      params: {}
+"""
 from __future__ import annotations
 
 from typing import List
@@ -6,6 +20,7 @@ from typing import List
 import numpy as np
 
 from eaigle.preprocessing.ops.base_op import BaseOp
+
 
 def _build_op(op_cfg: dict) -> BaseOp:
     op_type = op_cfg["type"]
@@ -29,8 +44,9 @@ def _build_op(op_cfg: dict) -> BaseOp:
 
     raise ValueError(f"Unknown preprocessing op: {op_type}")
 
+
 class PreprocessingPipeline:
-    
+    """Chain of preprocessing operations applied sequentially to each frame."""
 
     def __init__(self, ops: List[BaseOp]):
         self._ops = ops

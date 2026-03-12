@@ -13,8 +13,9 @@ _CONVERT_MAP = {
     ("GRAY", "BGR"): cv2.COLOR_GRAY2BGR,
 }
 
+
 class ColorConvertOp(BaseOp):
-    
+    """Convert between colour spaces (e.g. BGR→RGB for most DL models)."""
 
     def __init__(self, src: str = "BGR", dst: str = "RGB"):
         key = (src.upper(), dst.upper())

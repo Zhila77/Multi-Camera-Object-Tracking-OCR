@@ -20,7 +20,6 @@ cameras:
     # Mock cameras (simulator fills in rtsp:// at runtime)
     - id: cam_01
       rtsp_url: "rtsp://localhost:8554/cam_01"
-      # rtsp_url: "/tmp/sample_frame.jpg"
       target_fps: 10
       width: 1280
       height: 720
@@ -73,7 +72,7 @@ preprocessing:
 
 # --- Inference service ---
 inference:
-  url: "http://localhost:8001"
+  url: "http://inference:8001"
   batch_size: 8
   batch_timeout_ms: 50.0
   http_timeout_s: 5.0
@@ -87,7 +86,7 @@ aggregation:
 
 # --- Transport ---
 redis:
-  url: "redis://localhost:6379/0"
+  url: "redis://redis:6379/0"
 
 # --- Observability ---
 observability:

@@ -8,9 +8,7 @@ RUN pip install --no-cache-dir \
         fastapi \
         "uvicorn[standard]" \
         numpy \
-        pydantic \
-        ultralytics \
-        opencv-python-headless
+        pydantic
 
 COPY inference_service/ inference_service/
 

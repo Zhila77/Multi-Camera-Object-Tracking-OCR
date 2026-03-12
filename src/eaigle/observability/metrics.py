@@ -1,4 +1,20 @@
+"""
+Prometheus metrics for the pipeline.
 
+All metrics are created once at module import time and shared across
+the process.  The HTTP server is started by calling start_metrics_server().
+
+Key metrics:
+  - eaigle_frames_captured_total        — ingestion throughput per camera
+  - eaigle_frames_preprocessed_total    — preprocessing throughput
+  - eaigle_inference_batch_size         — batch efficiency histogram
+  - eaigle_inference_latency_ms         — per-stage latency histogram
+  - eaigle_pipeline_latency_ms          — end-to-end frame latency
+  - eaigle_camera_reconnects_total      — reliability indicator
+  - eaigle_dropped_frames_total         — data loss counter
+  - eaigle_redis_stream_lag             — consumer group lag gauge
+  - eaigle_hypotheses_total             — throughput of final outputs
+"""
 from __future__ import annotations
 
 import threading
@@ -10,6 +26,7 @@ from prometheus_client import (
     start_http_server,
 )
 
+# ---- Counters ----
 FRAMES_CAPTURED = Counter(
     "eaigle_frames_captured_total",
     "Total frames captured from RTSP cameras",
@@ -31,7 +48,7 @@ CAMERA_RECONNECTS = Counter(
 DROPPED_FRAMES = Counter(
     "eaigle_dropped_frames_total",
     "Frames dropped due to errors or back-pressure",
-    ["reason"],
+    ["reason"],  # "shm_write", "publish_error", "backpressure"
 )
 
 HYPOTHESES_PRODUCED = Counter(
@@ -40,6 +57,7 @@ HYPOTHESES_PRODUCED = Counter(
     ["camera_id"],
 )
 
+# ---- Histograms ----
 PREPROCESS_LATENCY = Histogram(
     "eaigle_preprocess_latency_ms",
     "Time spent in preprocessing per frame (ms)",
@@ -66,6 +84,7 @@ PIPELINE_LATENCY = Histogram(
     buckets=[50, 100, 200, 300, 500, 1000, 2000],
 )
 
+# ---- Gauges ----
 REDIS_STREAM_LAG = Gauge(
     "eaigle_redis_stream_lag",
     "Pending message count in Redis Stream consumer group",
@@ -77,6 +96,7 @@ ACTIVE_CAMERAS = Gauge(
     "Number of camera streams currently connected",
 )
 
+
 def start_metrics_server(port: int = 9090) -> None:
-    
+    """Start the Prometheus metrics HTTP server in a background daemon thread."""
     start_http_server(port)

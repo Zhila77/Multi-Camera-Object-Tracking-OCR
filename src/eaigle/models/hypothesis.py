@@ -1,4 +1,11 @@
+"""
+Final hypothesis model — the fused, human-readable conclusion produced
+by the Data Integrator layer from all inference stage results.
 
+Examples:
+  "Vehicle ABC123 detected at Gate 3"
+  "Unauthorized person detected in Zone A"
+"""
 from __future__ import annotations
 
 import time
@@ -8,20 +15,24 @@ from typing import List, Optional
 
 from eaigle.models.detection import Detection
 
+
 @dataclass
 class Hypothesis:
-    
+    """
+    The final output of one complete pipeline cycle for a single frame.
+    Captures what was seen, where, when, and with what confidence.
+    """
     hypothesis_id: str
     frame_id: str
     camera_id: str
-    capture_ts: float
-    final_ts: float
-    primary_detections: List[Detection]
-    secondary_detections: List[Detection]
-    event_description: str
+    capture_ts: float           # When the frame was captured
+    final_ts: float             # When the hypothesis was produced
+    primary_detections: List[Detection]     # Stage-1 results (vehicle, person…)
+    secondary_detections: List[Detection]   # Stage-2 results (plate, badge…)
+    event_description: str      # Human-readable summary
     overall_confidence: float
     fusion_strategy: str
-    pipeline_latency_ms: float
+    pipeline_latency_ms: float  # capture_ts → final_ts
 
     @classmethod
     def create(
@@ -64,6 +75,7 @@ class Hypothesis:
             "fusion_strategy": self.fusion_strategy,
             "pipeline_latency_ms": self.pipeline_latency_ms,
         }
+
 
 @dataclass
 class CameraConfig:

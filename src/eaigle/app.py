@@ -1,5 +1,5 @@
 
-
+# EAIGLE AI — Pipeline Application Entry Point.
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ try:
     import uvloop
     uvloop.install()
 except ImportError:
-    pass
+    pass  
 
 from eaigle.aggregation.hypothesis_fusion import HypothesisFusion
 from eaigle.aggregation.hypothesis_store import HypothesisStore
@@ -26,6 +26,7 @@ from eaigle.preprocessing.worker_pool import PreprocessingWorkerPool
 from eaigle.transport.redis_client import RedisClient
 logger = logging.getLogger(__name__)
 
+
 def _build_ingestion_backend(
     backend: str,
     cam_cfgs: list,
@@ -33,7 +34,13 @@ def _build_ingestion_backend(
     stop_event: asyncio.Event,
     ds_cfg: dict,
 ):
-    
+    """
+    Factory: returns the appropriate ingestion manager based on config.
+
+    Tries DeepStream first if requested; automatically falls back to
+    OpenCV (default) with a warning if DeepStream is unavailable (e.g. no GPU,
+    no DeepStream SDK installed).
+    """
     if backend == "deepstream":
         try:
             from eaigle.ingestion.deepstream_manager import DeepStreamIngestionManager
@@ -51,6 +58,7 @@ def _build_ingestion_backend(
                 "DeepStream unavailable (%s) — falling back to OpenCV backend", exc
             )
 
+    # OpenCV fallback (default)
     logger.info("Ingestion backend: OpenCV + FFmpeg")
     return CameraStreamManager(
         camera_configs=cam_cfgs,
@@ -58,13 +66,15 @@ def _build_ingestion_backend(
         stop_event=stop_event,
     )
 
+
 async def _shm_cleanup_loop(stop_event: asyncio.Event) -> None:
-    
+    """Periodically remove stale shared memory blocks (leak guard)."""
     while not stop_event.is_set():
         await asyncio.sleep(10)
         n = cleanup_stale_shm(max_age_s=15.0)
         if n:
             logger.debug("Cleaned up %d stale shm blocks", n)
+
 
 async def main(cfg: dict) -> None:
     obs = cfg.get("observability", {})
@@ -75,16 +85,19 @@ async def main(cfg: dict) -> None:
     start_metrics_server(port=obs.get("metrics_port", 9090))
     logger.info("EAIGLE AI pipeline starting")
 
+    # ---- Redis ----
     redis_cfg = cfg.get("redis", {})
     redis = await RedisClient.create(redis_cfg.get("url", "redis://localhost:6379/0"))
     logger.info("Redis connected")
 
+    # ---- Camera configs ----
     cam_cfgs = [
         CameraConfig.from_dict(c) for c in cfg["cameras"]["streams"]
     ]
     camera_ids = [c.camera_id for c in cam_cfgs]
     camera_zones = {c.camera_id: c.zone for c in cam_cfgs}
 
+    # ---- Shared stop event ----
     stop_event = asyncio.Event()
 
     def _handle_signal(*_) -> None:
@@ -95,6 +108,7 @@ async def main(cfg: dict) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _handle_signal)
 
+    # ---- Build components ----
     inf_cfg     = cfg.get("inference", {})
     agg_cfg     = cfg.get("aggregation", {})
     pp_cfg      = cfg.get("preprocessing", {})
@@ -139,6 +153,7 @@ async def main(cfg: dict) -> None:
         store=store,
     )
 
+    # ---- Run all layers concurrently ----
     logger.info(
         "Starting pipeline: %d cameras, %d pp workers, batch_size=%d",
         len(cam_cfgs), pp_cfg.get("num_workers", 4), inf_cfg.get("batch_size", 8),
@@ -156,12 +171,30 @@ async def main(cfg: dict) -> None:
     await redis.close()
     logger.info("Pipeline shut down cleanly")
 
+
 def _load_config(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
 
+# 
 if __name__ == "__main__":
-    
+    """
+    Terminal 1 — Redis
+    docker start eaigle-redis   
+
+    Terminal 2 — Inference service
+    source .venv/bin/activate
+    uvicorn inference_service.app:app --port 8001
+
+    Terminal 3 — Mock cameras (simulates 5 RTSP cameras)
+    source .venv/bin/activate
+    python3 scripts/simulate_cameras.py --cameras 5 --fps 10
+
+    Terminal 4 — Main pipeline
+    source .venv/bin/activate
+    python3 -m eaigle.app --config configs/pipeline.yaml
+
+    """
     parser = argparse.ArgumentParser(description="EAIGLE AI pipeline")
     parser.add_argument(
         "--config",

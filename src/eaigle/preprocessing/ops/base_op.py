@@ -1,12 +1,13 @@
-
+"""Base class for all preprocessing operations."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
 import numpy as np
 
+
 class BaseOp(ABC):
-    
+    """A stateless, callable image transformation."""
 
     @abstractmethod
     def __call__(self, frame: np.ndarray) -> np.ndarray:

@@ -1,5 +1,14 @@
+"""
+CameraWorker — manages a single RTSP camera stream.
 
-
+Concurrency model:
+  - Runs as an asyncio coroutine inside the event loop.
+  - cv2.VideoCapture.read() is BLOCKING, so it is offloaded to a
+    ThreadPoolExecutor to prevent blocking the event loop.
+  - Automatic reconnection with configurable backoff.
+  - Back-pressure: if the preprocessed_frames Redis stream exceeds the
+    high-water mark, the worker sleeps an extra frame interval.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +16,9 @@ import concurrent.futures
 import logging
 import time
 from typing import Optional
+
 import cv2
+
 from eaigle.models.frame import FrameMetadata
 from eaigle.models.hypothesis import CameraConfig
 from eaigle.preprocessing.shm_utils import write_frame_to_shm
@@ -15,10 +26,12 @@ from eaigle.transport.stream_producer import StreamProducer
 
 logger = logging.getLogger(__name__)
 
+# Back-pressure: pause ingestion when downstream queue is this deep
 BACKPRESSURE_THRESHOLD = 300
 
+
 class CameraWorker:
-    
+    """Reads frames from one RTSP camera and publishes them to Redis Stream."""
 
     def __init__(
         self,
@@ -35,13 +48,17 @@ class CameraWorker:
         self._seq: int = 0
         self._frame_interval: float = 1.0 / config.target_fps
 
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
     async def run(self) -> None:
         logger.info("Camera %s starting", self.config.camera_id)
         loop = asyncio.get_running_loop()
         consecutive_failures = 0
 
         while not self._stop.is_set():
-
+            # ---- Connect / reconnect ----
             if self._cap is None or not self._cap.isOpened():
                 connected = await loop.run_in_executor(
                     self._executor, self._connect
@@ -59,6 +76,7 @@ class CameraWorker:
 
             frame_start = loop.time()
 
+            # ---- Read frame (blocking — offloaded to thread) ----
             ret, frame = await loop.run_in_executor(
                 self._executor, self._read_frame
             )
@@ -82,10 +100,11 @@ class CameraWorker:
 
             consecutive_failures = 0
 
+            # ---- Write frame to shared memory ----
             meta = FrameMetadata.create(
                 camera_id=self.config.camera_id,
                 sequence_num=self._seq,
-                shm_key="",
+                shm_key="",   # filled in below
                 shape=frame.shape,
                 dtype=str(frame.dtype),
                 pipeline_stage="raw",
@@ -99,6 +118,7 @@ class CameraWorker:
                 logger.error("Camera %s shm write error: %s", self.config.camera_id, exc)
                 continue
 
+            # ---- Publish metadata pointer to Redis Stream ----
             try:
                 await self._producer.publish(
                     stream_name=f"raw_frames:{self.config.camera_id}",
@@ -108,6 +128,7 @@ class CameraWorker:
             except Exception as exc:
                 logger.error("Camera %s publish error: %s", self.config.camera_id, exc)
 
+            # ---- Rate limiting ----
             elapsed = loop.time() - frame_start
             sleep_time = max(0.0, self._frame_interval - elapsed)
             if sleep_time:
@@ -115,6 +136,10 @@ class CameraWorker:
 
         await loop.run_in_executor(self._executor, self._release)
         logger.info("Camera %s stopped", self.config.camera_id)
+
+    # ------------------------------------------------------------------
+    # Blocking helpers (run in thread pool)
+    # ------------------------------------------------------------------
 
     def _connect(self) -> bool:
         self._release()

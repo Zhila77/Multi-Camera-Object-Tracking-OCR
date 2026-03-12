@@ -1,4 +1,13 @@
+"""
+HypothesisStore — persists final hypotheses to Redis and broadcasts
+them via Redis Pub/Sub so downstream consumers (dashboards, alerters,
+analytics) can subscribe without polling.
 
+Storage layout:
+  HASH  hypothesis:{hypothesis_id}  → all fields (TTL 60s)
+  LIST  camera_hypotheses:{camera_id}  → last 100 hypothesis_ids (LPUSH/LTRIM)
+  PUBLISH hypotheses  → JSON event for real-time subscribers
+"""
 from __future__ import annotations
 
 import json
@@ -13,6 +22,7 @@ HYPOTHESIS_TTL_S = 60
 CAMERA_HISTORY_LEN = 100
 PUBSUB_CHANNEL = "hypotheses"
 
+
 class HypothesisStore:
     def __init__(self, redis: RedisClient):
         self._r = redis.raw
@@ -21,6 +31,7 @@ class HypothesisStore:
         data = h.to_dict()
         key = f"hypothesis:{h.hypothesis_id}"
 
+        # Flatten nested dicts to JSON strings for HSET compatibility
         flat = {
             k: json.dumps(v) if isinstance(v, (dict, list)) else str(v)
             for k, v in data.items()
